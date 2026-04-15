@@ -11,7 +11,7 @@ This project demonstrates a Retrieval-Augmented Generation (RAG) pipeline, a met
 To get started with this project, clone the repository and install the necessary dependencies.
 
 ```bash
-git clone https://github.com/yourusername/rag-nutrition-pipeline.git
+git clone https://github.com/raahul4004/rag-nutrition-pipeline.git
 cd rag-nutrition-pipeline
 pip install -r requirements.txt
 ```
