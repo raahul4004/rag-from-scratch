@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-from-scratch"
+version = "0.1.0"
+description = "Local RAG pipeline over a human nutrition textbook"
+requires-python = ">=3.10"
+dependencies = [
+    "PyMuPDF",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "requests",
+    "sentence-transformers",
+    "spacy",
+    "tqdm",
+    "transformers",
+    "accelerate",
+    "torch",
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+[project.optional-dependencies]
+cuda = [
+    "bitsandbytes",
+    "flash-attn",
+]
+
+[project.scripts]
+rag-build-index = "scripts.build_index:main"
+rag-search = "scripts.search:main"
+rag-ask = "scripts.ask:main"
+rag-ui = "app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
