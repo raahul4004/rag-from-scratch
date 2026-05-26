@@ -33,10 +33,15 @@ def load_llm(
 
     tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-    dtype = torch.float16 if device == "cuda" else torch.float32
+    if device == "cpu":
+        dtype = torch.float32
+    elif device == "mps":
+        dtype = torch.float16
+    else:
+        dtype = torch.float16
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=dtype,
+        dtype=dtype,
         quantization_config=quant_config,
         low_cpu_mem_usage=True,
         attn_implementation=attn_impl,
