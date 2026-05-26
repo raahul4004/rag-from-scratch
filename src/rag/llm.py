@@ -75,20 +75,23 @@ def ask(
     for i, item in enumerate(context_items):
         item["score"] = float(scores[i])
 
-    prompt, base_prompt = format_prompt(query=query, context_items=context_items)
+    prompt, _ = format_prompt(
+        query=query, context_items=context_items, tokenizer=tokenizer
+    )
 
     input_ids = tokenizer(prompt, return_tensors="pt").to(llm_model.device)
+    prompt_len = input_ids["input_ids"].shape[1]
+
     outputs = llm_model.generate(
         **input_ids,
         temperature=temperature,
         do_sample=True,
         max_new_tokens=max_new_tokens,
+        pad_token_id=tokenizer.eos_token_id,
     )
 
-    decoded = tokenizer.decode(outputs[0])
-    for token in ("<s>", "<|user|>", "<|end|>", "<|assistant|>"):
-        decoded = decoded.replace(token, "")
-    answer = decoded[len(base_prompt) + 2 :].strip()
+    new_tokens = outputs[0, prompt_len:]
+    answer = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
     if return_context:
         return answer, context_items

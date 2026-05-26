@@ -1,33 +1,45 @@
-BASE_PROMPT = """Based on the following context items, please answer the query.
-Give yourself room to think by extracting relevant passages from the context before answering the query.
-Don't return the thinking, only return the answer.
-Make sure your answers are as explanatory as possible.
-Use the following examples as reference for the ideal answer style.
+SYSTEM_PROMPT = """You are a helpful nutrition assistant answering questions using passages from a human nutrition textbook.
 
-Example 1:
-Query: What are the fat-soluble vitamins?
-Answer: The fat-soluble vitamins include Vitamin A, Vitamin D, Vitamin E, and Vitamin K. These vitamins are absorbed along with fats in the diet and can be stored in the body's fatty tissue and liver for later use. Vitamin A is important for vision, immune function, and skin health. Vitamin D plays a critical role in calcium absorption and bone health. Vitamin E acts as an antioxidant, protecting cells from damage. Vitamin K is essential for blood clotting and bone metabolism.
+Rules:
+- Answer only from the provided context. If the context does not contain the answer, say so plainly.
+- Write in clear, well-formed English sentences. No bullet headers, no scaffolding tokens, no meta commentary.
+- Be specific and explanatory; aim for 3-6 sentences unless the question demands more.
+- Do not repeat the question and do not preface your answer with phrases like "Based on the context"."""
 
-Example 2:
-Query: What are the causes of type 2 diabetes?
-Answer: Type 2 diabetes is often associated with overnutrition, particularly the overconsumption of calories leading to obesity. Factors include a diet high in refined sugars and saturated fats, which can lead to insulin resistance, a condition where the body's cells do not respond effectively to insulin. Over time, the pancreas cannot produce enough insulin to manage blood sugar levels, resulting in type 2 diabetes.
 
-Example 3:
-Query: What is the importance of hydration for physical performance?
-Answer: Hydration is crucial for physical performance because water plays key roles in maintaining blood volume, regulating body temperature, and ensuring the transport of nutrients and oxygen to cells. Adequate hydration is essential for optimal muscle function, endurance, and recovery. Dehydration can lead to decreased performance, fatigue, and increased risk of heat-related illnesses.
-
-Now use the following context items to answer the user query:
+USER_TEMPLATE = """Context passages from the textbook:
 {context}
 
-Relevant passages: <extract relevant passages from the context here>
-User query: {query}
-Answer:"""
+Question: {query}"""
 
 
-def format_prompt(query: str, context_items: list[dict]) -> tuple[str, str]:
-    context = "- " + "\n- ".join(item["sentence_chunk"] for item in context_items)
-    base_prompt = BASE_PROMPT.format(context=context, query=query)
-    return base_prompt, base_prompt
+def format_prompt(query: str, context_items: list[dict], tokenizer=None) -> tuple[str, str]:
+    """Build a prompt for the LLM.
+
+    If a tokenizer with a chat template is provided, use it (proper instruction
+    formatting for Phi-3). Otherwise fall back to a plain string template.
+
+    Returns (prompt, base_prompt) where base_prompt is what the model sees as
+    its context (used to strip the prompt from the decoded output).
+    """
+    context = "\n\n".join(
+        f"[page {item.get('page_number', '?')}] {item['sentence_chunk']}"
+        for item in context_items
+    )
+    user_msg = USER_TEMPLATE.format(context=context, query=query)
+
+    if tokenizer is not None and getattr(tokenizer, "chat_template", None):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg},
+        ]
+        prompt = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        return prompt, prompt
+
+    fallback = f"{SYSTEM_PROMPT}\n\n{user_msg}\n\nAnswer:"
+    return fallback, fallback
 
 
 SAMPLE_QUERIES = [
