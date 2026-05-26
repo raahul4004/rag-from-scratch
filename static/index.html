@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Nutrition RAG</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #14171c;
+    --panel-2: #1a1e25;
+    --border: #262b33;
+    --text: #e7eaf0;
+    --muted: #8a93a3;
+    --accent: #8ab4ff;
+    --accent-2: #79e2c2;
+    --danger: #ff7a7a;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -20%, #1b2230 0%, var(--bg) 60%) fixed;
+    color: var(--text);
+    font: 14px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    min-height: 100%;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: 0.2px; }
+  h1 .dot { color: var(--accent-2); }
+  .meta { color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: var(--panel); border: 1px solid var(--border); font-size: 11px; }
+  .pill.ok::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); }
+  .pill.bad::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
+
+  .tabs { display: flex; gap: 4px; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); width: fit-content; margin-bottom: 14px; }
+  .tab { padding: 6px 14px; border-radius: 7px; cursor: pointer; color: var(--muted); user-select: none; font-size: 13px; }
+  .tab.active { background: var(--panel-2); color: var(--text); }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 14px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row + .row { margin-top: 10px; }
+
+  input[type="text"], input[type="number"] {
+    flex: 1; min-width: 0;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font: inherit; outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input[type="text"]:focus, input[type="number"]:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 3px rgba(138,180,255,0.12);
+  }
+  input[type="number"] { width: 92px; flex: 0 0 auto; }
+  label { color: var(--muted); font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+
+  button {
+    background: var(--accent); color: #0a0d12; border: 0; border-radius: 8px;
+    padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer;
+    transition: filter .15s, transform .05s;
+  }
+  button:hover { filter: brightness(1.08); }
+  button:active { transform: translateY(1px); }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); font-weight: 500; }
+  button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+    cursor: pointer; transition: color .15s, border-color .15s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+
+  .answer { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 14px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+  .answer.empty { color: var(--muted); font-style: italic; }
+
+  .results { display: flex; flex-direction: column; gap: 8px; }
+  .result {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; line-height: 1.55;
+  }
+  .result-head {
+    display: flex; gap: 10px; align-items: center; margin-bottom: 6px;
+    color: var(--muted); font-size: 11px; letter-spacing: 0.3px; text-transform: uppercase;
+  }
+  .score { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+  .page { margin-left: auto; }
+
+  .status-line { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+  .status-line.err { color: var(--danger); }
+
+  .spinner {
+    width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: -2px; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hidden { display: none; }
+
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
+  details[open] summary { color: var(--text); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #232831; border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="dot">●</span> Nutrition RAG</h1>
+    <div class="meta" id="meta">
+      <span class="pill" id="device">device …</span>
+      <span class="pill" id="indexPill">index …</span>
+    </div>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <div class="tab active" data-tab="search">Search</div>
+    <div class="tab" data-tab="ask">Ask</div>
+  </div>
+
+  <!-- SEARCH TAB -->
+  <section id="tab-search" class="tab-panel">
+    <div class="card">
+      <div class="row">
+        <input id="q1" type="text" placeholder="e.g. foods high in fiber" autocomplete="off" />
+        <label>Top K <input id="k1" type="number" min="1" max="15" value="5" /></label>
+        <button id="btn1">Search</button>
+      </div>
+      <div class="samples" id="samples1"></div>
+      <div class="status-line" id="status1"></div>
+    </div>
+    <div id="results1" class="results"></div>
+  </section>
+
+  <!-- ASK TAB -->
+  <section id="tab-ask" class="tab-panel hidden">
+    <div class="card">
+      <div class="row">
+        <input id="q2" type="text" placeholder="e.g. What are Vitamins?" autocomplete="off" />
+        <button id="btn2">Ask</button>
+      </div>
+      <div class="row">
+        <label>Top K <input id="k2" type="number" min="1" max="10" value="5" /></label>
+        <label>Temperature <input id="t2" type="number" step="0.1" min="0.1" max="1.5" value="0.7" /></label>
+        <label>Max tokens <input id="m2" type="number" step="32" min="64" max="1024" value="256" /></label>
+      </div>
+      <div class="samples" id="samples2"></div>
+      <div class="status-line" id="status2"></div>
+    </div>
+    <div class="card">
+      <div class="result-head">Answer</div>
+      <div id="answer" class="answer empty">Ask something to see a generated answer.</div>
+    </div>
+    <details>
+      <summary>Context used</summary>
+      <div id="results2" class="results" style="margin-top:10px;"></div>
+    </details>
+  </section>
+</div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const tabs = document.querySelectorAll(".tab");
+  const panels = { search: $("#tab-search"), ask: $("#tab-ask") };
+  tabs.forEach((t) =>
+    t.addEventListener("click", () => {
+      tabs.forEach((x) => x.classList.toggle("active", x === t));
+      Object.entries(panels).forEach(([k, p]) => p.classList.toggle("hidden", k !== t.dataset.tab));
+    })
+  );
+
+  function fmtScore(s) { return s.toFixed(4); }
+
+  function renderResults(target, items) {
+    target.innerHTML = "";
+    if (!items.length) {
+      target.innerHTML = `<div class="result" style="color:var(--muted)">No results.</div>`;
+      return;
+    }
+    for (const [i, r] of items.entries()) {
+      const el = document.createElement("div");
+      el.className = "result";
+      el.innerHTML = `
+        <div class="result-head">
+          <span>#${i + 1}</span>
+          <span class="score">${fmtScore(r.score)}</span>
+          <span class="page">page ${r.page}</span>
+        </div>
+        <div></div>`;
+      el.lastElementChild.textContent = r.text;
+      target.appendChild(el);
+    }
+  }
+
+  function setStatus(el, msg, err = false) {
+    el.classList.toggle("err", !!err);
+    el.innerHTML = msg;
+  }
+  function busy(el, msg) { setStatus(el, `<span class="spinner"></span>${msg}`); }
+
+  async function call(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async function doSearch() {
+    const q = $("#q1").value.trim();
+    if (!q) return;
+    const k = parseInt($("#k1").value, 10) || 5;
+    const btn = $("#btn1"); btn.disabled = true;
+    busy($("#status1"), "Searching…");
+    try {
+      const data = await call("/api/search", { query: q, top_k: k });
+      renderResults($("#results1"), data.results);
+      setStatus($("#status1"), `${data.results.length} chunks · top score ${fmtScore(data.results[0]?.score || 0)}`);
+    } catch (e) {
+      setStatus($("#status1"), e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function doAsk() {
+    const q = $("#q2").value.trim();
+    if (!q) return;
+    const k = parseInt($("#k2").value, 10) || 5;
+    const t = parseFloat($("#t2").value) || 0.7;
+    const m = parseInt($("#m2").value, 10) || 256;
+    const btn = $("#btn2"); btn.disabled = true;
+    busy($("#status2"), "Generating… (LLM may be slow without CUDA)");
+    $("#answer").classList.add("empty");
+    $("#answer").textContent = "Thinking…";
+    try {
+      const data = await call("/api/ask", { query: q, top_k: k, temperature: t, max_new_tokens: m });
+      $("#answer").classList.remove("empty");
+      $("#answer").textContent = data.answer || "(empty)";
+      renderResults($("#results2"), data.context);
+      setStatus($("#status2"), `done · ${data.context.length} chunks of context`);
+    } catch (e) {
+      $("#answer").classList.add("empty");
+      $("#answer").textContent = "Ask something to see a generated answer.";
+      setStatus($("#status2"), e.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $("#btn1").addEventListener("click", doSearch);
+  $("#btn2").addEventListener("click", doAsk);
+  $("#q1").addEventListener("keydown", (e) => { if (e.key === "Enter") doSearch(); });
+  $("#q2").addEventListener("keydown", (e) => { if (e.key === "Enter") doAsk(); });
+
+  // status + samples
+  fetch("/api/status").then((r) => r.json()).then((s) => {
+    $("#device").textContent = `device · ${s.device}`;
+    const ind = $("#indexPill");
+    ind.textContent = s.index_ready ? "index ready" : "index missing";
+    ind.classList.add(s.index_ready ? "ok" : "bad");
+    for (const target of ["#samples1", "#samples2"]) {
+      const host = $(target);
+      const inputId = target === "#samples1" ? "#q1" : "#q2";
+      const runner = target === "#samples1" ? doSearch : doAsk;
+      s.samples.forEach((q) => {
+        const c = document.createElement("span");
+        c.className = "chip"; c.textContent = q;
+        c.addEventListener("click", () => { $(inputId).value = q; runner(); });
+        host.appendChild(c);
+      });
+    }
+  });
+</script>
+</body>
+</html>

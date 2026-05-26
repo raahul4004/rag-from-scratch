@@ -121,6 +121,12 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
+# Generated data (regenerable via scripts/build_index.py)
+data/
+
+# Claude Code workspace state
+.claude/
+
 # Environments
 .env
 .venv
