@@ -1,58 +1,174 @@
-# RAG Pipeline for Human Nutrition Textbook
+# RAG from Scratch — Nutrition Textbook
 
-This repository contains the implementation of a Retrieval-Augmented Generation (RAG) pipeline. The RAG model downloads a human nutrition textbook, retrieves context from the textbook, and generates relevant responses. The implementation uses sentence embeddings created with `all-mpnet-base-v2` and leverages the `unsloth/Phi-3-mini-4k-instruct` language model.
+A local Retrieval-Augmented Generation pipeline over a 1200-page human
+nutrition textbook. Built without LangChain, LlamaIndex, or a vector
+database — just sentence-transformers, PyMuPDF, spaCy, and a local LLM.
 
-## Introduction
+Comes with a small FastAPI + plain-HTML UI for interactive search and
+question answering.
 
-This project demonstrates a Retrieval-Augmented Generation (RAG) pipeline, a method that combines retrieval of relevant documents with generative language models to provide context-aware responses. The RAG model first downloads a human nutrition textbook, processes it to create sentence embeddings, and then retrieves relevant contexts to generate answers to user queries.
+## What's inside
 
-## Installation
+| Stage | Tool | What happens |
+|---|---|---|
+| Ingest | `PyMuPDF (fitz)` | Download the textbook PDF, extract text per page |
+| Sentencize | `spaCy` | Split each page into sentences |
+| Chunk | custom | Group every 10 sentences into a chunk; drop chunks < 30 tokens |
+| Embed | `sentence-transformers` (`all-mpnet-base-v2`) | 768-dim embeddings, batched on GPU/MPS/CPU |
+| Index | flat tensor on disk | CSV with chunks + embedding vectors (~22 MB) |
+| Retrieve | `torch.topk` over `util.dot_score` | Top-k chunks per query, milliseconds |
+| Generate | `transformers` (`unsloth/Phi-3-mini-4k-instruct`) | Few-shot prompt + sampled decoding |
 
-To get started with this project, clone the repository and install the necessary dependencies.
+No external services. Everything runs on your machine.
 
-```bash
-git clone https://github.com/raahul4004/rag-nutrition-pipeline.git
-cd rag-nutrition-pipeline
-pip install -r requirements.txt
+## Project layout
+
+```
+.
+├── app.py                  FastAPI server + /api/{status,search,ask}
+├── static/index.html       Single-page UI (no framework)
+├── src/rag/
+│   ├── config.py           Paths, model names, device autodetect
+│   ├── ingest.py           PDF download + text extraction
+│   ├── chunking.py         spaCy sentencizer + chunking + filtering
+│   ├── embeddings.py       Encode / save / load embeddings
+│   ├── retrieval.py        Dot-product top-k similarity search
+│   ├── prompts.py          Few-shot RAG template + sample queries
+│   └── llm.py              Phi-3 loader and end-to-end ask()
+├── scripts/
+│   ├── build_index.py      One-shot: PDF → embeddings.csv
+│   ├── search.py           Retrieval-only CLI
+│   └── ask.py              Full RAG QA CLI
+├── pyproject.toml
+└── rag.ipynb               Original walkthrough notebook (preserved)
 ```
 
-## Usage
-
-To run the RAG pipeline, open the Jupyter notebook `RAG_notebook.ipynb` and follow the steps outlined in the notebook. The notebook includes code to:
-
-1. Download the human nutrition textbook.
-2. Process the textbook to create sentence embeddings using the `all-mpnet-base-v2` model.
-3. Retrieve relevant contexts from the textbook.
-4. Generate responses using the `unsloth/Phi-3-mini-4k-instruct` language model.
-
-## Requirements
-
-The project dependencies are listed in the `requirements.txt` file. 
-
-
-Ensure you have all the required packages by installing them via `pip`:
+## Quickstart
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/raahul4004/rag-from-scratch.git
+cd rag-from-scratch
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# 1. Build the index (downloads PDF + embedding model on first run; ~2 min on Apple Silicon)
+python scripts/build_index.py
+
+# 2a. Use the CLI
+python scripts/search.py "foods high in fiber"
+python scripts/ask.py "What are Vitamins?"
+
+# 2b. Or launch the web UI
+python app.py     # http://127.0.0.1:7860
 ```
 
-## Project Structure
+## Web UI
 
-The repository contains the following files:
+Two tabs:
 
-- `requirements.txt`: List of dependencies required for the project.
-- `RAG_notebook.ipynb`: Jupyter notebook with the complete implementation of the RAG pipeline.
+- **Search** — embed a query, return the top-k most relevant textbook chunks
+  with score and page number. Fast, no LLM, runs in milliseconds.
+- **Ask** — full RAG: retrieve top-k context, build a few-shot prompt,
+  generate an answer with the local LLM. Slow without CUDA.
 
-## Acknowledgments
+The UI lazy-loads heavy models, so the server boots instantly. Errors
+(missing index, LLM unavailable) surface inline as a red status line.
 
-- The sentence embeddings are created using the `all-mpnet-base-v2` model from the `sentence-transformers` library.
-- The language model used for generation is `unsloth/Phi-3-mini-4k-instruct`.
+## Device support
 
-This project is inspired by the need to create an efficient and accurate context-aware generative model for educational purposes.
+`src/rag/config.py` auto-detects:
+
+| Device | Embeddings | LLM | Notes |
+|---|---|---|---|
+| CUDA | fast | fast (4-bit via bitsandbytes if installed) | Best path; install `pip install -e .[cuda]` |
+| MPS (Apple Silicon) | fast | usable | No `bitsandbytes` / `flash-attn`; falls back to fp32 + sdpa |
+| CPU | OK | very slow | Fine for embeddings; LLM gen is 30s+/answer |
+
+## Configuration
+
+All knobs live in `src/rag/config.py`:
+
+```python
+embedding_model_name = "all-mpnet-base-v2"
+llm_model_id         = "unsloth/Phi-3-mini-4k-instruct"
+num_sentence_chunk_size = 10     # sentences per chunk
+min_token_length        = 30     # filter tiny chunks
+n_resources_to_return   = 5      # top-k
+```
+
+To use a different textbook, change `pdf_url` and re-run `scripts/build_index.py`.
+
+## API endpoints
+
+The FastAPI server exposes:
+
+```
+GET  /                  HTML UI
+GET  /api/status        device, model names, index_ready, sample queries
+POST /api/search        { query, top_k }                       → ranked chunks
+POST /api/ask           { query, top_k, temperature, max_new_tokens } → answer + context
+```
+
+OpenAPI docs auto-generated at `/docs`.
+
+## How the pipeline works
+
+```
+       ┌──────────────┐
+PDF ─► │ open_and_    │ ─► pages_and_texts (1208 pages)
+       │   read_pdf   │
+       └──────────────┘
+              │
+              ▼
+       ┌──────────────┐
+       │ spaCy        │ ─► page-level sentence lists
+       │ sentencizer  │
+       └──────────────┘
+              │
+              ▼
+       ┌──────────────┐
+       │ chunk +      │ ─► 1680 chunks (after min-token filter)
+       │ filter       │
+       └──────────────┘
+              │
+              ▼
+       ┌──────────────┐
+       │ all-mpnet-   │ ─► (1680, 768) embedding tensor → CSV
+       │ base-v2      │
+       └──────────────┘
+
+Query time:
+  query → embed (1, 768) → dot-product vs (1680, 768) → topk → context
+  context + few-shot prompt → Phi-3 → answer
+```
+
+## Things that aren't here (on purpose)
+
+- No vector DB. The corpus is small enough that a single dense tensor + `torch.topk` is faster than spinning up FAISS or Qdrant.
+- No LangChain / LlamaIndex wrappers. The pipeline is small enough to read top-to-bottom in `src/rag/`.
+- No reranker / query rewriting / hybrid BM25. The point is to see what raw dense retrieval + a small LLM can do.
+
+## Differences from the original notebook
+
+The original `rag.ipynb` is preserved as the walkthrough. The package
+fixes a few notebook bugs along the way:
+
+- `page_token)count` typo → `page_token_count`
+- Hardcoded `device="cuda"` → autodetect cuda/mps/cpu
+- Undefined `use_quantization_config` → gated on CUDA presence
+- `prompt_formatter` returned one value; `ask()` unpacked two — now consistent
+- Regex `[A-z]` (matches `[\]^_\``) → `[A-Z]`
+- Quantization (`bitsandbytes`) and `flash-attn` made optional, not hard deps
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+MIT — see [LICENSE](LICENSE).
 
----
+## Acknowledgments
 
+- Textbook: *Human Nutrition* (Open Educational Resources, U. of Hawaiʻi)
+- Embeddings: [`sentence-transformers/all-mpnet-base-v2`](https://huggingface.co/sentence-transformers/all-mpnet-base-v2)
+- LLM: [`unsloth/Phi-3-mini-4k-instruct`](https://huggingface.co/unsloth/Phi-3-mini-4k-instruct)
+- Inspired by Daniel Bourke's "RAG from scratch" walkthrough.
